@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 
 '''
 EC2 external inventory script
@@ -159,6 +159,8 @@ from boto import elasticache
 from boto import route53
 from boto import sts
 import six
+import json
+import paramiko
 
 from ansible.module_utils import ec2 as ec2_utils
 
@@ -271,6 +273,10 @@ class Ec2Inventory(object):
         elif not self.is_cache_valid():
             self.do_api_calls_update_cache()
 
+        # Map ansible user
+        #self.do_api_calls_update_cache()
+        #for host in self.inventory['_meta']['hostvars']:
+        #    print host
         # Data to print
         if self.args.host:
             data_to_print = self.get_host_info()
@@ -282,6 +288,9 @@ class Ec2Inventory(object):
             else:
                 data_to_print = self.json_format_dict(self.inventory, True)
 
+        ami_mapping_file = open(self.ami_mapping_path,'w')
+        ami_mapping_file.write(json.dumps(self.ami_mapping_data))
+        ami_mapping_file.close()
         print(data_to_print)
 
     def is_cache_valid(self):
@@ -316,6 +325,16 @@ class Ec2Inventory(object):
             config = configparser.SafeConfigParser(DEFAULTS)
         ec2_ini_path = os.environ.get('EC2_INI_PATH', defaults['ec2']['ini_path'])
         ec2_ini_path = os.path.expanduser(os.path.expandvars(ec2_ini_path))
+        self.ami_mapping_path = os.path.join(os.path.dirname(__file__), '%s.ami.mapping' % 'ec2')
+        self.ec2_key_path = os.path.join(os.path.dirname(__file__), '%s.key' % 'ec2')
+
+        try:
+            ami_mapping_file = open(self.ami_mapping_path)
+            self.ami_mapping_data = json.loads(ami_mapping_file.read())
+            ami_mapping_file.close()
+        except Exception as e:
+            self.ami_mapping_data = {}
+            #print "%s is not containing valid json string or that file is not existed. Please check!" % self.ami_mapping_path
 
         if not os.path.isfile(ec2_ini_path):
             ec2_ini_path = os.path.expanduser(defaults['ec2']['ini_fallback'])
@@ -337,6 +356,9 @@ class Ec2Inventory(object):
         # is eucalyptus?
         self.eucalyptus = config.getboolean('ec2', 'eucalyptus')
         self.eucalyptus_host = config.get('ec2', 'eucalyptus_host')
+
+        # exclude some ips use don't want to add to your inventory
+        self.ip_private_exclude = config.get('ec2', 'private_ip_exclude')
 
         # Regions
         self.regions = []
@@ -880,8 +902,38 @@ class Ec2Inventory(object):
         addressable '''
 
         # Only return instances with desired instance states
+                
         if instance.state not in self.ec2_instance_states:
             return
+        if instance.platform == 'windows':
+            return
+        if instance.private_ip_address in self.ip_private_exclude:
+            return
+
+        # ami_mapping_path
+        # self.ec2_key_path
+
+        ansible_user = 'ec2-user'
+        if os.path.isfile(self.ami_mapping_path):
+            ami_mapping_data = self.ami_mapping_data
+            ami_id = instance.image_id
+            host = instance.private_ip_address
+            if ami_id in ami_mapping_data:
+                ansible_user = ami_mapping_data[ami_id]
+            else:
+                paramiko_key = paramiko.RSAKey.from_private_key_file(self.ec2_key_path)
+                paramiko_client = paramiko.SSHClient()
+                paramiko_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                for user in ['ubuntu','ec2-user','admin']:
+                    try:
+                        print host
+                        paramiko_client.connect( hostname=host, username=user, pkey=paramiko_key, timeout=10 )
+                        ami_mapping_data[ami_id] = user
+                        ansible_user = user
+                        break
+                    except:
+                        continue
+            self.ami_mapping_data = ami_mapping_data
 
         # Select the best destination address
         # When destination_format and destination_format_tags are specified
@@ -1069,6 +1121,7 @@ class Ec2Inventory(object):
 
         self.inventory["_meta"]["hostvars"][hostname] = self.get_host_info_dict_from_instance(instance)
         self.inventory["_meta"]["hostvars"][hostname]['ansible_host'] = dest
+        self.inventory["_meta"]["hostvars"][hostname]['ansible_user'] = ansible_user
 
     def add_rds_instance(self, instance, region):
         ''' Adds an RDS instance to the inventory and index, as long as it is
@@ -1188,7 +1241,7 @@ class Ec2Inventory(object):
         # Global Tag: all RDS instances
         self.push(self.inventory, 'rds', hostname)
 
-        self.inventory["_meta"]["hostvars"][hostname] = self.get_host_info_dict_from_instance(instance)
+        #self.inventory["_meta"]["hostvars"][hostname] = self.get_host_info_dict_from_instance(instance)
         self.inventory["_meta"]["hostvars"][hostname]['ansible_host'] = dest
 
     def add_elasticache_cluster(self, cluster, region):
