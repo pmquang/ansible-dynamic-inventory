@@ -1,3 +1,13 @@
 This is repo for Ansible EC2 dynamic inventory.
 
- 
+Guide: 
+
+cp * /etc/ansible/
+mv /etc/ansible/ec2.py /etc/ansible/hosts
+chmod +x /etc/ansible/hosts
+
+Run playbook:
+ansible-playbook test.yaml
+
+Run Ansible:
+ansible  

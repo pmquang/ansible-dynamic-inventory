@@ -230,7 +230,8 @@ DEFAULTS = {
     'route53_excluded_zones': '',
     'route53_hostnames': None,
     'stack_filters': 'False',
-    'vpc_destination_variable': 'ip_address'
+    'vpc_destination_variable': 'ip_address',
+    'test_ssh_key_path': 'ec2.key'
 }
 
 
@@ -358,7 +359,14 @@ class Ec2Inventory(object):
         self.eucalyptus_host = config.get('ec2', 'eucalyptus_host')
 
         # exclude some ips use don't want to add to your inventory
-        self.ip_private_exclude = config.get('ec2', 'private_ip_exclude')
+        self.private_ip_exclude = config.get('ec2', 'private_ip_exclude')
+        self.platform_exclude = config.get('ec2','platform_exclude')
+        
+        self.test_ssh_user = config.get('ec2','test_ssh_user')
+        self.test_ssh_key_path = config.get('ec2','test_ssh_key_path')
+
+        if not os.path.isabs(self.test_ssh_key_path):
+            self.test_ssh_key_path = os.path.join(os.path.dirname(__file__), self.test_ssh_key_path )
 
         # Regions
         self.regions = []
@@ -905,9 +913,9 @@ class Ec2Inventory(object):
                 
         if instance.state not in self.ec2_instance_states:
             return
-        if instance.platform == 'windows':
+        if instance.platform in self.platform_exclude:
             return
-        if instance.private_ip_address in self.ip_private_exclude:
+        if instance.private_ip_address in self.private_ip_exclude:
             return
 
         # ami_mapping_path
@@ -924,9 +932,8 @@ class Ec2Inventory(object):
                 paramiko_key = paramiko.RSAKey.from_private_key_file(self.ec2_key_path)
                 paramiko_client = paramiko.SSHClient()
                 paramiko_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                for user in ['ubuntu','ec2-user','admin']:
+                for user in self.test_ssh_user:
                     try:
-                        print host
                         paramiko_client.connect( hostname=host, username=user, pkey=paramiko_key, timeout=10 )
                         ami_mapping_data[ami_id] = user
                         ansible_user = user
@@ -1241,7 +1248,7 @@ class Ec2Inventory(object):
         # Global Tag: all RDS instances
         self.push(self.inventory, 'rds', hostname)
 
-        #self.inventory["_meta"]["hostvars"][hostname] = self.get_host_info_dict_from_instance(instance)
+        self.inventory["_meta"]["hostvars"][hostname] = self.get_host_info_dict_from_instance(instance)
         self.inventory["_meta"]["hostvars"][hostname]['ansible_host'] = dest
 
     def add_elasticache_cluster(self, cluster, region):
