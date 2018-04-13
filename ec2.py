@@ -567,6 +567,7 @@ class Ec2Inventory(object):
 
         for region in self.regions:
             self.get_instances_by_region(region)
+
             if self.rds_enabled:
                 self.get_rds_instances_by_region(region)
             if self.elasticache_enabled:
@@ -913,7 +914,7 @@ class Ec2Inventory(object):
                 
         if instance.state not in self.ec2_instance_states:
             return
-        if instance.platform in self.platform_exclude:
+        if str(instance.platform) in self.platform_exclude:
             return
         if instance.private_ip_address in self.private_ip_exclude:
             return
@@ -929,11 +930,12 @@ class Ec2Inventory(object):
             if ami_id in ami_mapping_data:
                 ansible_user = ami_mapping_data[ami_id]
             else:
-                paramiko_key = paramiko.RSAKey.from_private_key_file(self.ec2_key_path)
+                paramiko_key = paramiko.RSAKey.from_private_key_file(self.test_ssh_key_path)
                 paramiko_client = paramiko.SSHClient()
                 paramiko_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                for user in self.test_ssh_user:
+                for user in self.test_ssh_user.split(','):
                     try:
+                        user = user.strip(' \t\n\r')
                         paramiko_client.connect( hostname=host, username=user, pkey=paramiko_key, timeout=10 )
                         ami_mapping_data[ami_id] = user
                         ansible_user = user
