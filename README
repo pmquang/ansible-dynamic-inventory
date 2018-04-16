@@ -10,4 +10,4 @@ Run playbook:
 ansible-playbook test.yaml
 
 Run Ansible:
-ansible  
+ansible ec2 -m ping 
